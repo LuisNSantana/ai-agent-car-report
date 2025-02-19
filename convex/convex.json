@@ -1,0 +1,9 @@
+{
+    "node": {
+      "externalPackages": ["*"]
+    },
+    "fileStorage": {
+    "bucket": "market-reports",
+    "region": "us-east-1"
+  }
+  }

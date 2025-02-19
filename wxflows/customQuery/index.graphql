@@ -1,0 +1,11 @@
+
+extend type Query {
+  customMyQuery(zip: String = "33025", make: String = "Ford", model: String = "Mustang"): MarketcheckRoot
+    @rest(
+      method: POST,
+      endpoint: "https://8794-79-116-251-143.ngrok-free.app/api/customMyQuery",
+      postbody: "{ \"zip\": \"{{zip}}\", \"make\": \"{{make}}\", \"model\": \"{{model}}\" }"
+    )
+}
+
+

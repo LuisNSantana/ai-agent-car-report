@@ -1,0 +1,8 @@
+extend type Query {
+  fixedMyQuery: MarketcheckRoot
+    @rest(
+      method: POST,
+      endpoint: "https://8794-79-116-251-143.ngrok-free.app/api/customMyQuery",
+      postbody: "{ \"zip\": \"33025\", \"make\": \"Ford\", \"model\": \"Mustang\" }"
+    )
+}

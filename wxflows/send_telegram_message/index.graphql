@@ -1,0 +1,37 @@
+extend type Mutation {
+  sendTelegramMessage(
+    chat_id: String!,
+    text: String!
+  ): TelegramMessageResponse
+  @rest(
+    method: POST,
+    endpoint: "/api/telegram/sendMessage",
+    postbody: "{ \"chat_id\": \"{chat_id}\", \"text\": \"{text}\" }"
+  )
+}
+
+type TelegramMessageResponse {
+  ok: Boolean
+  result: Result
+}
+
+type Result {
+  chat: Chat
+  date: Int
+  from: From
+  message_id: Int
+  text: String
+}
+
+type Chat {
+  first_name: String
+  id: ID
+  type: String
+}
+
+type From {
+  first_name: String
+  id: ID
+  is_bot: Boolean
+  username: String
+}

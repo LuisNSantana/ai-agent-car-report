@@ -1,0 +1,95 @@
+extend type Query {
+  getDynamicCarData: TC_GraphQL
+    @supplies(query: "tc_tools")
+    @materializer(
+      query: "tc_graphql_tool"
+      arguments: [
+        { name: "name", const: "getDynamicCarData" }
+        {
+          name: "description"
+          const: "Retrieve active car listings using dynamic parameters (zip, make, model). Returns detailed market data including build, price, miles, dealer info, and images."
+        }
+        { name: "fields", const: "getCarsData" }
+      ]
+    )
+
+  custom_curl: TC_GraphQL
+    @supplies(query: "tc_tools")
+    @materializer(
+      query: "tc_graphql_tool"
+      arguments: [
+        { name: "name", const: "custom_curl" }
+        {
+          name: "description"
+          const: "Retrieve active car listings using a dynamic Next.js endpoint."
+        }
+        { name: "fields", const: "customMyQuery" }
+      ]
+    )
+
+  fixed_curl: TC_GraphQL
+    @supplies(query: "tc_tools")
+    @materializer(
+      query: "tc_graphql_tool"
+      arguments: [
+        { name: "name", const: "fixed_curl" }
+        {
+          name: "description"
+          const: "Retrieve active car listings using fixed parameters via a custom endpoint. This tool always uses zip: '33025', make: 'Ford' and model: 'Mustang'."
+        }
+        { name: "fields", const: "fixedMyQuery" }
+      ]
+    )
+
+  generate_pdf: TC_GraphQL
+    @supplies(query: "tc_tools")
+    @materializer(
+      query: "tc_graphql_tool"
+      arguments: [
+        { name: "name", const: "generate_pdf" }
+        {
+          name: "description"
+          const: "Generate a PDF report of car market data using our custom endpoint."
+        }
+        { name: "fields", const: "generateReport" }
+      ]
+    )
+
+  youtube_transcript: TC_GraphQL
+    @supplies(query: "tc_tools")
+    @materializer(
+      query: "tc_graphql_tool"
+      arguments: [
+        { name: "name", const: "youtube_transcript" }
+        {
+          name: "description"
+          const: "Retrieve transcripts for a given YouTube video. The videoUrl should be in the format https://www.youtube.com/watch?v=VIDEO_ID."
+        }
+        { name: "fields", const: "transcript" }
+      ]
+    )
+
+  send_telegram_message: TC_GraphQL
+    @supplies(query: "tc_tools")
+    @materializer(
+      query: "tc_graphql_tool"
+      arguments: [
+        { name: "name", const: "send_telegram_message" }
+        {
+          name: "description"
+          const: "Send a Telegram message using session-based authentication. Requires chat_id and message text."
+        }
+        { name: "fields", const: "sendTelegramMessage" }
+      ]
+    )
+
+  getChatIdByNickname(nickname: String!): ChatIdResponse
+    @rest(method: GET, endpoint: "/api/telegram/getChatId?nickname={nickname}")
+
+  getChatIdByPhone(phone: String!): ChatIdResponse
+    @rest(method: GET, endpoint: "/api/telegram/getChatId?phone={phone}")
+}
+
+type ChatIdResponse {
+  chat_id: String
+}

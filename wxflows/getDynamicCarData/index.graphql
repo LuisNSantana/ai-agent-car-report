@@ -1,0 +1,146 @@
+"""
+Información técnica del vehículo.
+"""
+type Build {
+  year: Int
+  make: String
+  model: String
+  trim: String
+  version: String
+  body_type: String
+  body_subtype: String
+  engine: String
+  engine_size: Float
+  engine_block: String
+  transmission: String
+  drivetrain: String
+  fuel_type: String
+  city_mpg: Int
+  highway_mpg: Int
+  overall_length: Float
+  overall_width: Float
+  overall_height: Float
+  std_seating: Int
+  powertrain_type: String
+  doors: Int
+}
+
+"""
+Información del concesionario.
+"""
+type Dealer {
+  id: Int
+  name: String
+  street: String
+  city: String
+  state: String
+  zip: Int
+  country: String
+  latitude: Float
+  longitude: Float
+  dealer_type: String
+  dealership_group_name: String
+  msa_code: Int
+  phone: String
+  seller_email: String
+  website: String
+}
+
+"""
+Información del concesionario según Marketcheck (si aplica).
+"""
+type McDealership {
+  mc_website_id: Int
+  mc_dealer_id: Int
+  mc_location_id: Int
+  mc_rooftop_id: Int
+  mc_dealership_group_id: Int
+  mc_dealership_group_name: String
+  mc_sub_dealership_group_id: Int
+  mc_sub_dealership_group_name: String
+  mc_category: String
+  website: String
+  name: String
+  dealer_type: String
+  street: String
+  city: String
+  state: String
+  country: String
+  latitude: Float
+  longitude: Float
+  zip: Int
+  msa_code: Int
+  phone: String
+  seller_email: String
+}
+
+"""
+Información de medios (imágenes) del vehículo.
+"""
+type Media {
+  photo_links: [String]
+  photo_links_cached: [String]
+}
+
+"""
+Cada entrada de listado de vehículo.
+"""
+type ListingsEntry {
+  id: String
+  vin: String
+  heading: String
+  build: Build
+  price: Int
+  miles: Int
+  msrp: Int
+  vdp_url: String
+  dealer: Dealer
+  mc_dealership: McDealership
+  media: Media
+  exterior_color: String
+  interior_color: String
+  carfax_1_owner: Boolean
+  carfax_clean_title: Boolean
+  dom: Int
+  dom_180: Int
+  dom_active: Int
+  dos_active: Int
+  data_source: String
+  scraped_at: Int
+  scraped_at_date: DateTime
+  first_seen_at: Int
+  first_seen_at_date: DateTime
+  first_seen_at_source: Int
+  first_seen_at_source_date: DateTime
+  first_seen_at_mc: Int
+  first_seen_at_mc_date: DateTime
+  ref_price: Int
+  price_change_percent: Float
+  ref_price_dt: Int
+  ref_miles: Int
+  ref_miles_dt: Int
+  source: String
+  stock_no: String
+  in_transit: Boolean
+  availability_status: String
+}
+
+"""
+Tipo raíz que encapsula los resultados.
+"""
+type MarketcheckRoot {
+  num_found: Int
+  listings: [ListingsEntry]
+}
+
+extend type Query {
+  getCarsData: MarketcheckRoot
+   @rest(
+      method: POST,
+      endpoint: "https://8794-79-116-251-143.ngrok-free.app/api/customMyQuery",
+      postbody: "{ \"zip\": \"33025\", \"make\": \"Ford\", \"model\": \"Mustang\", \"limit\": 20 }"
+    )
+}
+
+
+
