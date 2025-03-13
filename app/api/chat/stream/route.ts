@@ -9,11 +9,11 @@ import {
 } from "@/lib/types";
 import { getConvexClient } from "@/lib/convex";
 import { api } from "@/convex/_generated/api";
-import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
+import { AIMessage, HumanMessage, ToolMessage, BaseMessage } from "@langchain/core/messages";
 import { submitQuestion } from "@/lib/langgraph";
 
-// Necesitarás esto si tu runtime es Edge:
-export const runtime = "edge";
+// Cambiamos a runtime "nodejs" para soportar módulos nativos de Node.js como 'stream' (necesarios para google-ads-api)
+export const runtime = "nodejs";
 
 // Define un interface para los resultados de búsqueda de autos
 interface CarSearchResult {
@@ -52,7 +52,21 @@ export async function POST(req: Request) {
     // 2) Obtener datos del body
     const { messages, newMessage, chatId } = (await req.json()) as ChatRequestBody;
 
-    // 3) Crear un stream SSE
+    // 3) Validar parámetros requeridos
+    if (!newMessage || !chatId) {
+      const stream = new TransformStream();
+      const writer = stream.writable.getWriter();
+      await sendSSEMessage(writer, {
+        type: StreamMessageType.Error,
+        error: "Faltan parámetros requeridos (newMessage o chatId)",
+      });
+      await writer.close();
+      return new Response(stream.readable, {
+        headers: { "Content-Type": "text/event-stream" },
+      });
+    }
+
+    // 4) Crear un stream SSE
     const stream = new TransformStream({}, { highWaterMark: 1024 });
     const writer = stream.writable.getWriter();
 
@@ -65,7 +79,7 @@ export async function POST(req: Request) {
       },
     });
 
-    // 4) Iniciamos flujo asíncrono
+    // 5) Iniciamos flujo asíncrono
     (async () => {
       const convex = getConvexClient();
 
@@ -81,15 +95,23 @@ export async function POST(req: Request) {
 
         // Convertimos los mensajes a formato LangChain
         const langChainMessages = [
-          ...messages.map((m) =>
-            m.role === "user"
-              ? new HumanMessage(m.content)
-              : new AIMessage(m.content)
-          ),
+          ...messages.map((m) => {
+            if (m.role === "user") {
+              return new HumanMessage(m.content);
+            } else if (m.role === "assistant") {
+              return new AIMessage(m.content);
+            } else if (m.role === "tool") {
+              return new ToolMessage({
+                content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
+                tool_call_id: "default-tool-call-id", // Ajusta según tu lógica
+              });
+            }
+            return new HumanMessage(m.content); // Fallback seguro
+          }),
           new HumanMessage(newMessage),
         ];
 
-        // 4A) Detectamos si es una solicitud de búsqueda de autos
+        // 5A) Detectamos si es una solicitud de búsqueda de autos
         const searchRegex =
           /\b(?:buscar|busco)\b\s+(?<make>\w+)\s+(?<model>\w+)\s+(?<zip>\d{5})/i;
         const match = newMessage.match(searchRegex);
@@ -107,7 +129,7 @@ export async function POST(req: Request) {
               `https://8794-79-116-251-143.ngrok-free.app/api/customMyQuery?zip=${zip}&make=${make}&model=${model}`
             );
             if (!res.ok) {
-              throw new Error("Fallo la llamada a customMyQuery");
+              throw new Error(`Fallo la llamada a customMyQuery: ${res.statusText}`);
             }
             const result = await res.json();
             carSearchMemory[chatId] = result;
@@ -125,7 +147,21 @@ export async function POST(req: Request) {
           }
         }
 
-        // 4B) Llamamos a tu LLM normal (submitQuestion)
+        // 5B) Detectar solicitud de Google Ads y agregar mensaje
+        const googleAdsRegex = /\b(?:analiza|informe|datos)\b\s+la\s+campaña\s+de\s+Google\s+Ads\s+con\s+ID\s+(\d+)/i;
+        const googleAdsMatch = newMessage.match(googleAdsRegex);
+
+        if (googleAdsMatch) {
+          const campaignId = googleAdsMatch[1]; // Extrae el campaignId (ej. "123456789")
+          await sendSSEMessage(writer, {
+            type: StreamMessageType.Token,
+            token: `Analizando la campaña de Google Ads con ID ${campaignId}...`,
+          });
+          // Añade el mensaje para que LangChain lo procese con google_ads
+          langChainMessages.push(new HumanMessage(`Analiza la campaña de Google Ads con ID ${campaignId}`));
+        }
+
+        // 5C) Llamamos a tu LLM normal (submitQuestion) con los mensajes actualizados
         try {
           const eventStream = await submitQuestion(langChainMessages, chatId);
 
@@ -138,6 +174,18 @@ export async function POST(req: Request) {
                   token: text,
                 });
               }
+            } else if (event.event === "on_tool_start") {
+              const toolName = (event.data as any).tool; // Usamos as any para ignorar el error// Usamos 'tool' desde event.data (ahora TypeScript lo reconoce)
+              await sendSSEMessage(writer, {
+                type: StreamMessageType.Token,
+                token: `Iniciando herramienta: ${toolName}...`,
+              });
+            } else if (event.event === "on_tool_end") {
+              const toolOutput = event.data.output; // Usamos 'output' en lugar de 'result'
+              await sendSSEMessage(writer, {
+                type: StreamMessageType.Token,
+                token: `Herramienta completada: ${JSON.stringify(toolOutput)}`,
+              });
             }
           }
 
@@ -150,7 +198,7 @@ export async function POST(req: Request) {
           });
         }
 
-        // 5) Verificamos si el usuario quiere PDF
+        // 6) Verificamos si el usuario quiere PDF
         if (/\b(pdf|informe)\b/i.test(newMessage)) {
           try {
             const searchData = carSearchMemory[chatId];

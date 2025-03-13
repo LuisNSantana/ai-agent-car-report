@@ -1,54 +1,59 @@
 "use client";
 
-import { UserButton } from "@clerk/nextjs";
-import { Button } from "@/components/ui/button";
-import { HamburgerMenuIcon } from "@radix-ui/react-icons";
-import { useNavigation } from "@/lib/context/navigation";
-import { FaUserFriends } from "react-icons/fa"; // Importa un ícono intuitivo para redes sociales
+import Link from "next/link";
+import { SignInButton, SignedIn, SignedOut, UserButton } from "@clerk/nextjs";
+import { Sparkles } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 export default function Header() {
-  const { setIsMobileNavOpen } = useNavigation();
-
   return (
-    <header className="border-b border-gray-200/50 bg-white/80 backdrop-blur-xl sticky top-0 z-50">
-      <div className="flex items-center justify-between px-4 py-3">
-        <div className="flex items-center gap-3">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setIsMobileNavOpen(true)}
-            className="md:hidden text-gray-500 hover:text-gray-700 hover:bg-gray-100/50"
-          >
-            <HamburgerMenuIcon className="h-5 w-5" />
-          </Button>
-          <div className="font-semibold bg-gradient-to-r from-gray-800 to-gray-600 bg-clip-text text-transparent">
-            Chat with an AI Agent
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          {/* Botón para integración de redes sociales */}
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => {
-              window.location.href = "/dashboard/integrations"; // Ruta de la página de integración de cuentas
-            }}
-            className="text-gray-500 hover:text-gray-700 hover:bg-gray-100/50"
-            title="Link social accounts"
-          >
-            <FaUserFriends className="h-5 w-5" />
-          </Button>
+    <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+      <div className="container flex h-16 items-center justify-between">
+        <Link 
+          href="/" 
+          className={cn(
+            "flex items-center gap-2",
+            "text-lg font-semibold",
+            "bg-gradient-to-r from-foreground to-foreground/80",
+            "hover:from-primary hover:to-primary/80",
+            "bg-clip-text text-transparent",
+            "transition-all duration-200"
+          )}
+        >
+          <Sparkles className="h-5 w-5 text-primary animate-pulse" />
+          <span>Zynk</span>
+          <span className="text-xs font-normal px-2 py-0.5 rounded-full bg-primary/10 text-primary">
+            beta
+          </span>
+        </Link>
 
-          <UserButton
-            afterSignOutUrl="/"
-            appearance={{
-              elements: {
-                avatarBox:
-                  "h-8 w-8 ring-2 ring-gray-200/50 ring-offset-2 rounded-full transition-shadow hover:ring-gray-300/50",
-              },
-            }}
-          />
-        </div>
+        <nav className="flex items-center gap-4">
+          <SignedIn>
+            <div className="flex items-center justify-center">
+              <UserButton
+                afterSignOutUrl="/"
+                appearance={{
+                  elements: {
+                    avatarBox: "h-[32px] w-[32px] flex items-center justify-center"
+                  }
+                }}
+              />
+            </div>
+          </SignedIn>
+          <SignedOut>
+            <SignInButton mode="modal">
+              <button className={cn(
+                "inline-flex items-center justify-center",
+                "rounded-xl px-4 py-2 text-sm font-medium",
+                "bg-primary text-primary-foreground",
+                "hover:bg-primary/90",
+                "transition-colors duration-200"
+              )}>
+                Sign In
+              </button>
+            </SignInButton>
+          </SignedOut>
+        </nav>
       </div>
     </header>
   );
