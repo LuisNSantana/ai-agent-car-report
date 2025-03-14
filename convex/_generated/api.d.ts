@@ -17,6 +17,7 @@ import type * as chats from "../chats.js";
 import type * as messages from "../messages.js";
 import type * as reports from "../reports.js";
 import type * as telegramSessions from "../telegramSessions.js";
+import type * as tokenUsage from "../tokenUsage.js";
 import type * as usersTelegram from "../usersTelegram.js";
 
 /**
@@ -32,6 +33,7 @@ declare const fullApi: ApiFromModules<{
   messages: typeof messages;
   reports: typeof reports;
   telegramSessions: typeof telegramSessions;
+  tokenUsage: typeof tokenUsage;
   usersTelegram: typeof usersTelegram;
 }>;
 export declare const api: FilterApi<

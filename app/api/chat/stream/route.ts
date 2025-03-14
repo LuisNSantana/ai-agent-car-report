@@ -111,6 +111,8 @@ export async function POST(req: Request) {
           new HumanMessage(newMessage),
         ];
 
+        // Temporarily commented out tool-related functionality
+        /*
         // 5A) Detectamos si es una solicitud de búsqueda de autos
         const searchRegex =
           /\b(?:buscar|busco)\b\s+(?<make>\w+)\s+(?<model>\w+)\s+(?<zip>\d{5})/i;
@@ -160,44 +162,81 @@ export async function POST(req: Request) {
           // Añade el mensaje para que LangChain lo procese con google_ads
           langChainMessages.push(new HumanMessage(`Analiza la campaña de Google Ads con ID ${campaignId}`));
         }
+        */
 
-        // 5C) Llamamos a tu LLM normal (submitQuestion) con los mensajes actualizados
+        // 5C) Llamamos al LLM (DeepSeek) con los mensajes
         try {
-          const eventStream = await submitQuestion(langChainMessages, chatId);
+          const response: any = await submitQuestion(langChainMessages, chatId, userId);
 
-          for await (const event of eventStream) {
-            if (event.event === "on_chat_model_stream") {
-              const text = event.data.chunk?.content?.at(0)?.["text"];
-              if (text) {
+          // Handle different response types from DeepSeek
+          // DeepSeek might return a streaming response or a regular response
+          if (response) {
+            // Check if it's a regular response (not streaming)
+            if (typeof response === 'object' && 'content' in response) {
+              const content = response.content || "";
+              await sendSSEMessage(writer, {
+                type: StreamMessageType.Token,
+                token: content.toString(),
+              });
+            } 
+            // If it's a streaming response but not properly iterable
+            else if (typeof response === 'object' && (response as any).text) {
+              await sendSSEMessage(writer, {
+                type: StreamMessageType.Token,
+                token: (response as any).text.toString(),
+              });
+            }
+            // If it has generations property (another possible format)
+            else if (typeof response === 'object' && (response as any).generations) {
+              const text = (response as any).generations?.[0]?.[0]?.text || "";
+              await sendSSEMessage(writer, {
+                type: StreamMessageType.Token,
+                token: text,
+              });
+            }
+            // Last resort - try to stringify the response
+            else {
+              try {
+                const text = JSON.stringify(response);
                 await sendSSEMessage(writer, {
                   type: StreamMessageType.Token,
                   token: text,
                 });
+              } catch (e) {
+                console.error("Could not stringify response:", e);
+                await sendSSEMessage(writer, {
+                  type: StreamMessageType.Token,
+                  token: "Error: Could not process response",
+                });
               }
-            } else if (event.event === "on_tool_start") {
-              const toolName = (event.data as any).tool; // Usamos as any para ignorar el error// Usamos 'tool' desde event.data (ahora TypeScript lo reconoce)
-              await sendSSEMessage(writer, {
-                type: StreamMessageType.Token,
-                token: `Iniciando herramienta: ${toolName}...`,
-              });
-            } else if (event.event === "on_tool_end") {
-              const toolOutput = event.data.output; // Usamos 'output' en lugar de 'result'
-              await sendSSEMessage(writer, {
-                type: StreamMessageType.Token,
-                token: `Herramienta completada: ${JSON.stringify(toolOutput)}`,
-              });
             }
+          } else {
+            await sendSSEMessage(writer, {
+              type: StreamMessageType.Token,
+              token: "No response received from model",
+            });
           }
-
+          
+          // Send the "Done" message after processing the response
           await sendSSEMessage(writer, { type: StreamMessageType.Done });
         } catch (streamError) {
           console.error("Error en la generación de respuestas:", streamError);
+          // Send a more descriptive error message to the client
+          await sendSSEMessage(writer, {
+            type: StreamMessageType.Token,
+            token: `Lo siento, ocurrió un error al procesar tu mensaje: ${streamError instanceof Error ? streamError.message : 'Error desconocido'}. Por favor, intenta de nuevo.`,
+          });
+          // Send the error event after displaying the error message
           await sendSSEMessage(writer, {
             type: StreamMessageType.Error,
-            error: "Error generando la respuesta del asistente.",
+            error: streamError instanceof Error ? streamError.message : "Error desconocido al generar la respuesta.",
           });
+          // Make sure to send the Done event to properly close the stream
+          await sendSSEMessage(writer, { type: StreamMessageType.Done });
         }
 
+        // Temporarily commented out PDF generation functionality
+        /*
         // 6) Verificamos si el usuario quiere PDF
         if (/\b(pdf|informe)\b/i.test(newMessage)) {
           try {
@@ -211,7 +250,7 @@ export async function POST(req: Request) {
               return;
             }
 
-            console.log("📌 Enviando datos a generate-pdf...");
+            console.log(" Enviando datos a generate-pdf...");
             const pdfResponse = await fetch(
               "https://8794-79-116-251-143.ngrok-free.app/api/generate-pdf",
               {
@@ -224,27 +263,28 @@ export async function POST(req: Request) {
             if (pdfResponse.ok) {
               const pdfJson = await pdfResponse.json();
               const pdfUrl = pdfJson.pdfUrl;
-              console.log("✅ PDF generado correctamente:", pdfUrl);
+              console.log(" PDF generado correctamente:", pdfUrl);
 
               await sendSSEMessage(writer, {
                 type: StreamMessageType.Token,
                 token: `¡Informe PDF generado! Descárgalo aquí: ${pdfUrl}`,
               });
             } else {
-              console.error("❌ Error generando el PDF:", pdfResponse.statusText);
+              console.error(" Error generando el PDF:", pdfResponse.statusText);
               await sendSSEMessage(writer, {
                 type: StreamMessageType.Token,
                 token: "Hubo un problema al generar el PDF. Intenta nuevamente.",
               });
             }
           } catch (pdfError) {
-            console.error("❌ Error al generar el PDF:", pdfError);
+            console.error(" Error al generar el PDF:", pdfError);
             await sendSSEMessage(writer, {
               type: StreamMessageType.Token,
               token: "Error inesperado al generar el PDF.",
             });
           }
         }
+        */
       } catch (error) {
         console.error("Error en la API de chat:", error);
         await sendSSEMessage(writer, {

@@ -15,6 +15,8 @@ import { useUser } from "@clerk/nextjs";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
+import React from 'react';
 
 export default function DashboardPage() {
   const { user, isLoaded } = useUser();
@@ -23,6 +25,23 @@ export default function DashboardPage() {
   // Fetch user's chats
   const chats = useQuery(api.chats.listChats);
   
+  // Fetch token usage data with user ID when available
+  const tokenUsage = useQuery(
+    api.tokenUsage.getTotalTokenUsage,
+    isLoaded && user ? { userId: user.id } : "skip"
+  );
+
+  // Log token usage data for debugging
+  React.useEffect(() => {
+    if (tokenUsage) {
+      console.log("Token usage data:", tokenUsage);
+    } else if (tokenUsage === undefined) {
+      console.log("Token usage data is loading...");
+    } else {
+      console.log("No token usage data available");
+    }
+  }, [tokenUsage]);
+
   // Get the last 3 chats
   const recentChats = chats?.slice(0, 3) || [];
   
@@ -216,6 +235,96 @@ export default function DashboardPage() {
               </div>
             </CardContent>
           </Card>
+        </div>
+
+        {/* Token Usage Section */}
+        <div className="mt-8">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center space-x-2">
+              <Sparkles className="h-5 w-5 text-purple-500" />
+              <h2 className="text-xl font-semibold">Token Usage</h2>
+            </div>
+            <div className="flex items-center space-x-4">
+              <Link href="/dashboard/admin" className="flex items-center text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 transition-colors">
+                <span>Admin</span>
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="24"
+                  height="24"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="ml-1 h-4 w-4"
+                >
+                  <path d="M12 5v14"></path>
+                  <path d="M5 12h14"></path>
+                </svg>
+              </Link>
+              <Link href="/dashboard/usage" className="flex items-center text-sm text-purple-500 hover:text-purple-600 transition-colors">
+                <span>Detailed Analytics</span>
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="24"
+                  height="24"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="ml-1 h-4 w-4 transition-transform group-hover:translate-x-1"
+                >
+                  <path d="M5 12h14"></path>
+                  <path d="m12 5 7 7-7 7"></path>
+                </svg>
+              </Link>
+            </div>
+          </div>
+
+          {tokenUsage === undefined ? (
+            <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-gray-700">
+              <div className="flex justify-center items-center h-32">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-500"></div>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-gradient-to-br from-white to-purple-50 dark:from-gray-800 dark:to-gray-900 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-gray-700">
+              {tokenUsage && tokenUsage.totalTokens > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="flex flex-col items-center p-4 bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 hover:shadow-md transition-shadow">
+                    <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">Input Tokens</h3>
+                    <p className="text-3xl font-bold text-purple-600 dark:text-purple-400">{tokenUsage.totalInputTokens.toLocaleString()}</p>
+                    <p className="text-xs text-gray-500 mt-1">{tokenUsage.totalInputTokens > 0 ? `Across ${tokenUsage.totalChats} chats` : 'No tokens used yet'}</p>
+                  </div>
+                  
+                  <div className="flex flex-col items-center p-4 bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 hover:shadow-md transition-shadow">
+                    <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">Output Tokens</h3>
+                    <p className="text-3xl font-bold text-indigo-600 dark:text-indigo-400">{tokenUsage.totalOutputTokens.toLocaleString()}</p>
+                    <p className="text-xs text-gray-500 mt-1">{tokenUsage.totalOutputTokens > 0 ? `Across ${tokenUsage.totalChats} chats` : 'No tokens used yet'}</p>
+                  </div>
+                  
+                  <div className="flex flex-col items-center p-4 bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 hover:shadow-md transition-shadow">
+                    <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">Total Tokens</h3>
+                    <p className="text-3xl font-bold text-blue-600 dark:text-blue-400">{tokenUsage.totalTokens.toLocaleString()}</p>
+                    <p className="text-xs text-gray-500 mt-1">{tokenUsage.totalTokens > 0 ? `Across ${tokenUsage.totalChats} chats` : 'No tokens used yet'}</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center h-32 text-center">
+                  <Sparkles className="h-8 w-8 text-purple-400 mb-2 opacity-50" />
+                  <p className="text-gray-500 dark:text-gray-400 mb-1">No token usage data available yet</p>
+                  <p className="text-sm text-gray-400 dark:text-gray-500">Start a new chat to begin tracking token usage</p>
+                  <Link href="/chat" className="mt-4 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500">
+                    <Sparkles className="h-4 w-4 mr-2" />
+                    New Chat
+                  </Link>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Features Section */}

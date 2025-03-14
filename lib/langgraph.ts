@@ -1,254 +1,335 @@
-import {
-  AIMessage,
-  BaseMessage,
-  HumanMessage,
-  SystemMessage,
-  trimMessages,
-} from "@langchain/core/messages";
-import { ChatAnthropic } from "@langchain/anthropic";
-import {
-  END,
-  MessagesAnnotation,
-  START,
-  StateGraph,
-} from "@langchain/langgraph";
-import { MemorySaver } from "@langchain/langgraph";
-import { ToolNode } from "@langchain/langgraph/prebuilt";
-import wxflows from "@wxflows/sdk/langchain";
-import {
-  ChatPromptTemplate,
-  MessagesPlaceholder,
-} from "@langchain/core/prompts";
-import { GoogleAdsApi } from "google-ads-api"; // Nueva importación para Google Ads
-import { DynamicStructuredTool } from "@langchain/core/tools"; // Usamos DynamicStructuredTool
-import { z } from "zod"; // Usamos zod con tipos nativos
+import { ChatDeepSeek } from "@langchain/deepseek";
+import { BaseMessage, HumanMessage, AIMessage, SystemMessage } from "@langchain/core/messages";
+import { trimMessages } from "@langchain/core/messages";
+import { ChatPromptTemplate, MessagesPlaceholder } from "@langchain/core/prompts";
+import { getConvexClient } from "./convex";
+import { api } from "@/convex/_generated/api";
 import SYSTEM_MESSAGE from "@/constants/systemMessage";
 
-// Estimación de tokens basada en caracteres (aprox. 4 caracteres por token, más precisa)
+// More accurate token estimation for DeepSeek model
+// DeepSeek uses a similar tokenizer to GPT models, with approximately 4 characters per token
 const estimateTokens = (text: string) => {
-  return Math.ceil(text.length / 4);
+  // If text is not a string (e.g., it's an object), stringify it first
+  if (typeof text !== 'string') {
+    try {
+      text = JSON.stringify(text);
+    } catch (e) {
+      text = String(text);
+    }
+  }
+  
+  // Count tokens based on character count with adjustments for common patterns
+  const charCount = text.length;
+  
+  // Adjust for whitespace and punctuation which typically use fewer tokens
+  const whitespaceCount = (text.match(/\s/g) || []).length;
+  
+  // Adjust for numbers which typically use fewer tokens
+  const numberCount = (text.match(/\d/g) || []).length;
+  
+  // Adjust for special characters which might use more tokens
+  const specialCharCount = (text.match(/[^\w\s]/g) || []).length;
+  
+  // Calculate adjusted character count
+  const adjustedCharCount = charCount - (whitespaceCount * 0.5) - (numberCount * 0.5) + (specialCharCount * 0.5);
+  
+  // Convert to tokens (approximately 4 characters per token for most models)
+  return Math.ceil(adjustedCharCount / 4);
 };
 
-// Trimmer optimizado con un límite más razonable y tokenCounter mejorado
-const trimmer = trimMessages({
-  maxTokens: 1000, // Aumentamos a 1000 para análisis complejos, más realista que 10
-  strategy: "last",
-  tokenCounter: (msgs) => {
-    const totalText = msgs.map((m) => (m.content as string) || "").join(" ");
-    return estimateTokens(totalText);
-  },
-  includeSystem: true,
-  allowPartial: false,
-  startOn: "human",
-});
-
-// Conexión a wxflows usando variables nativas de Next.js
-const toolClient = new wxflows({
-  endpoint: process.env.WXFLOWS_ENDPOINT || "",
-  apikey: process.env.WXFLOWS_APIKEY,
-});
-
-// Obtener herramientas iniciales de wxflows
-const toolsPromise = toolClient.lcTools;
-const wxTools = await toolsPromise;
-
-// Herramienta para Google Ads como DynamicStructuredTool
-const googleAdsSchema = z.object({
-  campaignId: z.string().describe("The ID of the Google Ads campaign to analyze"),
-});
-
-const googleAdsTool = new DynamicStructuredTool({
-  name: "google_ads",
-  description: "Fetch marketing data from Google Ads for a specific campaign ID",
-  schema: googleAdsSchema,
-  func: async (input: z.infer<typeof googleAdsSchema>, runManager?: any, config?: any) => {
-    const customerId = process.env.GOOGLE_ADS_CUSTOMER_ID?.replace(/-/g, ""); // Ej. "1234567890"
-    const developerToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN;
-    const clientId = process.env.GOOGLE_CLIENT_ID;
-    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-    const refreshToken = process.env.GOOGLE_REFRESH_TOKEN;
-
-    if (!customerId || !developerToken) {
-      throw new Error("Missing Google Ads credentials in .env. Check .env.local file.");
+// Función para añadir encabezados de caché a los mensajes
+const addCachingHeaders = (messages: BaseMessage[]): BaseMessage[] => {
+  return messages.map((message) => {
+    if (message._getType() === "human") {
+      return new HumanMessage({
+        content: message.content,
+      });
+    } else if (message._getType() === "ai") {
+      return new AIMessage({
+        content: message.content,
+      });
+    } else {
+      return message;
     }
+  });
+};
 
-    const client = new GoogleAdsApi({
-      client_id: clientId || "",
-      client_secret: clientSecret || "",
-      developer_token: developerToken || "",
-      refresh_token: refreshToken || undefined, // Ahora TypeScript lo reconoce gracias a types/google-ads-api.d.ts
+// Crear un trimmer para mensajes que excedan el límite de tokens
+const trimmer = trimMessages({
+  maxTokens: 7000, // Reduced from 8000 to leave room for system message and response
+  tokenCounter: (messages: BaseMessage[]) => {
+    // Custom token counter for messages
+    return messages.reduce((acc, message) => {
+      const content = typeof message.content === 'string' 
+        ? message.content 
+        : JSON.stringify(message.content);
+      
+      try {
+        return acc + estimateTokens(content);
+      } catch (error) {
+        console.error("Failed to calculate number of tokens, falling back to approximate count", error);
+        return acc + Math.ceil(String(content).length / 4);
+      }
+    }, 0);
+  }
+});
+
+// Función para guardar el uso de tokens en la base de datos
+const saveTokenUsage = async (usage: { input_tokens: number; output_tokens: number }, chatId?: string, userId?: string) => {
+  try {
+    // Use the Convex client directly
+    const convexClient = getConvexClient();
+    
+    // Format chatId correctly for Convex if it exists
+    let formattedChatId = undefined;
+    if (chatId && chatId.trim() !== "") {
+      try {
+        // For Convex, we need to pass the ID directly, not an object
+        formattedChatId = chatId as any;
+      } catch (e) {
+        console.error("Invalid chat ID format:", e);
+      }
+    }
+    
+    // Ensure we have positive token counts
+    const inputTokens = Math.max(1, usage.input_tokens || 0);
+    const outputTokens = Math.max(1, usage.output_tokens || 0);
+    
+    // Get the current user ID from localStorage if available
+    // This is set by the ChatInterface component when the user logs in
+    let userIdToUse = "system"; // Default fallback
+    
+    if (userId) {
+      userIdToUse = userId;
+    } else {
+      try {
+        // Check if we're in a browser environment
+        if (typeof window !== 'undefined' && window.localStorage) {
+          const storedUserId = localStorage.getItem('currentUserId');
+          if (storedUserId) {
+            userIdToUse = storedUserId;
+            console.log("Using user ID from localStorage:", userIdToUse);
+          } else {
+            console.log("No user ID found in localStorage, using system as fallback");
+          }
+        } else {
+          console.log("Not in browser environment, using system as fallback");
+        }
+      } catch (error) {
+        console.error("Error getting user ID from localStorage:", error);
+      }
+    }
+    
+    console.log("Saving token usage to database:", {
+      userId: userIdToUse,
+      chatId: formattedChatId,
+      inputTokens,
+      outputTokens,
+      total: inputTokens + outputTokens
+    });
+    
+    // The server-side code in convex/tokenUsage.ts will 
+    // replace this with the actual authenticated user ID if available
+    await convexClient.mutation(api.tokenUsage.saveTokenUsage, {
+      userId: userIdToUse, 
+      chatId: formattedChatId,
+      inputTokens,
+      outputTokens,
+      model: "deepseek-chat",
+    });
+    
+    console.log("Token usage saved to database successfully");
+  } catch (error) {
+    console.error("Error saving token usage:", error);
+  }
+};
+
+// Custom token counter for DeepSeek model
+const countTokensManually = (messages: BaseMessage[]): { input_tokens: number } => {
+  let totalTokens = 0;
+  
+  for (const message of messages) {
+    const content = typeof message.content === 'string' 
+      ? message.content 
+      : JSON.stringify(message.content);
+    
+    totalTokens += estimateTokens(content);
+    
+    // Add overhead for message formatting (role, etc.)
+    totalTokens += 4; // Approximate overhead per message
+  }
+  
+  return { input_tokens: totalTokens };
+};
+
+// Inicializar modelo con DeepSeek
+const initialiseModel = (chatId?: string) => {
+  try {
+    const model = new ChatDeepSeek({
+      model: "deepseek-chat", 
+      apiKey: process.env.DEEPSEEK_API_KEY,
+      temperature: 0.5, // Reduced from 0.7 to make responses more deterministic and faster
+      maxCompletionTokens: 2048, // Reduced from 4096 to improve response time
+      streaming: false, // Disable streaming to ensure we get token usage
+      callbacks: [
+        {
+          handleLLMStart: async (llmInput: any) => {
+            // Count tokens manually before sending to the API
+            try {
+              const messages = llmInput.messages || [];
+              const tokenCount = countTokensManually(messages);
+              console.log("Estimated input tokens:", tokenCount.input_tokens);
+            } catch (error) {
+              console.error("Error counting tokens manually:", error);
+            }
+          },
+          handleLLMEnd: async (output: any) => {
+            const usage = output.llmOutput?.usage;
+            
+            // If the API doesn't return token usage, estimate it manually
+            if (!usage || !usage.input_tokens || !usage.output_tokens) {
+              console.log("API did not return token usage, estimating manually");
+              
+              // Estimate input tokens from the original messages
+              const inputMessages = output.runId?.configurable?.messages || [];
+              const inputTokens = countTokensManually(inputMessages).input_tokens;
+              
+              // Estimate output tokens from the generated content
+              let outputContent = "";
+              
+              // Try to extract content from different response formats
+              if (output.generations && output.generations[0] && output.generations[0][0]) {
+                outputContent = output.generations[0][0].text || "";
+              } else if (output.text) {
+                outputContent = output.text;
+              } else if (output.content) {
+                outputContent = output.content;
+              }
+              
+              const outputTokens = estimateTokens(outputContent);
+              
+              const estimatedUsage = {
+                input_tokens: inputTokens,
+                output_tokens: outputTokens
+              };
+              
+              console.log("Estimated Token Usage:", {
+                input: estimatedUsage.input_tokens,
+                output: estimatedUsage.output_tokens,
+                total: estimatedUsage.input_tokens + estimatedUsage.output_tokens,
+              });
+              
+              // Save estimated token usage to database
+              await saveTokenUsage(estimatedUsage);
+            } else {
+              // Use the API-provided token usage
+              console.log("Token Usage from API:", {
+                input: usage.input_tokens,
+                output: usage.output_tokens,
+                total: usage.input_tokens + usage.output_tokens,
+              });
+              
+              // Save token usage to database
+              await saveTokenUsage(usage);
+            }
+          },
+          handleLLMError: async (err: Error) => {
+            console.error("LLM Error:", err.message);
+          },
+        },
+      ],
     });
 
-    try {
-      const customer = client.Customer({
-        customer_id: customerId,
-        refresh_token: refreshToken || undefined, // Opcional, solo si lo tienes
-      });
-
-      const response = await customer.query(`
-        SELECT campaign.id, campaign.name, metrics.impressions, metrics.clicks, metrics.cost_micros
-        FROM campaign
-        WHERE campaign.id = ${parseInt(input.campaignId, 10)}
-        DURING LAST_30_DAYS
-      `);
-
-      const data = response[0]; // La respuesta es un array de resultados
-      if (!data) throw new Error("No data found for campaign ID");
-
-      return {
-        campaignName: data.campaign?.name || "Unknown Campaign",
-        impressions: data.metrics?.impressions || 0,
-        clicks: data.metrics?.clicks || 0,
-        cost: Number(data.metrics?.cost_micros || 0) / 1000000, // Convertir de micros a dólares
-      };
-    } catch (error: unknown) {
-      if (error instanceof Error) {
-        throw new Error(`Error fetching Google Ads data: ${error.message}`);
-      } else {
-        throw new Error("Error fetching Google Ads data: An unknown error occurred.");
-      }
-    }
-  },
-});
-
-// Definir todas las herramientas, incluyendo google_ads
-const tools = [
-  ...wxTools,
-  googleAdsTool, // Añadimos la herramienta de Google Ads
-];
-const toolNode = new ToolNode(tools);
-
-// Inicializar el modelo Anthropic con mejores callbacks y tool instructions
-const initialiseModel = () => {
-  const model = new ChatAnthropic({
-    modelName: "claude-3-5-sonnet-20241022",
-    anthropicApiKey: process.env.ANTHROPIC_API_KEY,
-    temperature: 0.7,
-    maxTokens: 4096,
-    streaming: true,
-    clientOptions: {
-      defaultHeaders: {
-        "anthropic-beta": "prompt-caching-2024-07-31",
-      },
-    },
-    callbacks: [
-      {
-        handleLLMStart: async () => {
-          console.log("🤖 Starting LLM call");
-        },
-        handleLLMEnd: async (output) => {
-          console.log("🤖 End LLM call", output);
-          const usage = output.llmOutput?.usage;
-          if (usage) {
-            console.log("📊 Token Usage:", {
-              input_tokens: usage.input_tokens,
-              output_tokens: usage.output_tokens,
-              total_tokens: usage.input_tokens + usage.output_tokens,
-              cache_creation_input_tokens: usage.cache_creation_input_tokens || 0,
-              cache_read_input_tokens: usage.cache_read_input_tokens || 0,
-            });
-          }
-        },
-        handleLLMNewToken: async (token: string) => {
-          console.log("🔤 New token:", token);
-        },
-      },
-    ],
-  }).bindTools(tools);
-
-  return model;
+    return model;
+  } catch (error) {
+    console.error("Error initializing DeepSeek model:", error);
+    throw error;
+  }
 };
 
-// Lógica para decidir si continuar el flujo
-function shouldContinue(state: typeof MessagesAnnotation.State) {
-  const lastMessage = state.messages[state.messages.length - 1] as AIMessage;
-
-  if (lastMessage.tool_calls?.length) {
-    return "tools";
-  }
-  if (lastMessage.content && lastMessage._getType() === "tool") {
-    return "agent";
-  }
-  return END;
-}
-
-// Crear el flujo de trabajo
-const createWorkflow = () => {
-  const model = initialiseModel();
-
-  return new StateGraph(MessagesAnnotation)
-    .addNode("agent", async (state) => {
-      const systemContent = SYSTEM_MESSAGE;
-
-      const promptTemplate = ChatPromptTemplate.fromMessages([
-        new SystemMessage(systemContent, { cache_control: { type: "ephemeral" } }),
-        new MessagesPlaceholder("messages"),
-      ]);
-
-      const trimmedMessages = await trimmer.invoke(state.messages);
-      const prompt = await promptTemplate.invoke({ messages: trimmedMessages });
-      const response = await model.invoke(prompt);
-
-      // Si hay datos de herramientas, estructurar un informe
-      if (state.messages.some((m) => m._getType() === "tool")) {
-        const toolData = state.messages
-          .filter((m) => m._getType() === "tool")
-          .map((m) => m.content);
-        const report = {
-          summary: response.content,
-          data: toolData,
-          recommendations: "Recomendaciones placeholder", // Implementar lógica después
-        };
-        return { messages: [new AIMessage(JSON.stringify(report))] };
-      }
-
-      return { messages: [response] };
-    })
-    .addNode("tools", toolNode)
-    .addEdge(START, "agent")
-    .addConditionalEdges("agent", shouldContinue)
-    .addEdge("tools", "agent");
-};
-
-// Optimización del caching para mensajes
-function addCachingHeaders(messages: BaseMessage[]): BaseMessage[] {
-  if (!messages.length) return messages;
-
-  const cachedMessages = [...messages];
-  const addCache = (message: BaseMessage) => {
-    message.content = [
-      {
-        type: "text",
-        text: message.content as string,
-        cache_control: { type: "ephemeral" },
-      },
+/**
+ * Submit a question to the DeepSeek model
+ * @param messages The messages to send to the model
+ * @param chatId The chat ID to associate with the question
+ * @param userId The user ID to associate with the token usage
+ * @returns The model's response
+ */
+export async function submitQuestion(
+  messages: BaseMessage[],
+  chatId: string,
+  userId?: string
+) {
+  try {
+    console.log("Processing question with DeepSeek...");
+    
+    // Cache the messages
+    const cachedMessages = messages;
+    
+    // Initialize the model with chatId
+    const model = initialiseModel(chatId);
+    
+    // Create the prompt template
+    const promptTemplate = ChatPromptTemplate.fromMessages([
+      ["system", SYSTEM_MESSAGE],
+      new MessagesPlaceholder("messages"),
+    ]);
+    
+    // Trim messages to fit context window
+    const trimmedMessages = await trimmer.invoke(cachedMessages);
+    
+    // Calculate token usage before sending to API
+    const allMessages = [
+      new SystemMessage(SYSTEM_MESSAGE),
+      ...trimmedMessages
     ];
-  };
-
-  const lastMessage = cachedMessages.at(-1);
-  if (lastMessage && lastMessage._getType() === "human") {
-    addCache(lastMessage);
-  }
-
-  return cachedMessages;
-}
-
-// Función principal exportada
-export async function submitQuestion(messages: BaseMessage[], chatId: string) {
-  const cachedMessages = addCachingHeaders(messages);
-
-  const workflow = createWorkflow();
-  const checkpointer = new MemorySaver();
-  const app = workflow.compile({ checkpointer });
-
-  const stream = await app.streamEvents(
-    { messages: cachedMessages },
-    {
-      version: "v2",
-      configurable: { thread_id: chatId },
-      streamMode: "messages",
+    
+    // Manually count input tokens
+    const inputTokens = countTokensManually(allMessages).input_tokens;
+    console.log("Manual token count before API call:", inputTokens);
+    
+    // Create the prompt
+    const prompt = await promptTemplate.invoke({ messages: trimmedMessages });
+    
+    // Get response from model
+    const response = await model.invoke(prompt, {
       runId: chatId,
+      configurable: { 
+        thread_id: chatId,
+        messages: allMessages
+      },
+    });
+    
+    // Extract content from response for token estimation
+    let outputContent = "";
+    if (typeof response === 'object') {
+      if ('content' in response) {
+        outputContent = response.content as string;
+      } else if ('text' in response) {
+        outputContent = (response as any).text;
+      }
+    } else if (typeof response === 'string') {
+      outputContent = response;
     }
-  );
-  return stream;
+    
+    // Always save token usage after getting a response
+    const outputTokens = estimateTokens(outputContent);
+    console.log("Final token usage:", {
+      input: inputTokens,
+      output: outputTokens,
+      total: inputTokens + outputTokens
+    });
+    
+    // Save token usage with the provided userId
+    await saveTokenUsage({
+      input_tokens: inputTokens,
+      output_tokens: outputTokens
+    }, chatId, userId);
+    
+    console.log("Response generated successfully");
+    return response;
+  } catch (error) {
+    console.error("Error in submitQuestion:", error);
+    // Re-throw the error to be handled by the API route
+    throw error;
+  }
 }

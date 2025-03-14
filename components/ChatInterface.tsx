@@ -12,6 +12,7 @@ import { getConvexClient } from "@/lib/convex";
 import { api } from "@/convex/_generated/api";
 import { cn } from "@/lib/utils";
 import { useNavigation } from "@/lib/context/navigation";
+import { useUser } from "@clerk/nextjs";
 
 interface ChatInterfaceProps {
   chatId: Id<"chats">;
@@ -60,6 +61,15 @@ export default function ChatInterface({
   } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { setIsMobileNavOpen } = useNavigation();
+  const { user, isLoaded } = useUser();
+
+  // Store user ID in localStorage for token usage tracking
+  useEffect(() => {
+    if (isLoaded && user) {
+      localStorage.setItem('currentUserId', user.id);
+      console.log("Stored user ID in localStorage:", user.id);
+    }
+  }, [isLoaded, user]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -534,6 +544,25 @@ export default function ChatInterface({
               onTagClick={handleTagClick}
             />
           )}
+          
+          {isLoading && !streamedResponse && (
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+                <Sparkles className="h-4 w-4" />
+              </div>
+              <div className="flex-1 max-w-[calc(100%-3rem)]">
+                <div className="bg-card/50 backdrop-blur-sm rounded-2xl rounded-tl-none p-4 text-foreground">
+                  <div className="flex space-x-2 items-center">
+                    <div className="h-3 w-3 bg-primary/40 rounded-full animate-pulse"></div>
+                    <div className="h-3 w-3 bg-primary/40 rounded-full animate-pulse delay-150"></div>
+                    <div className="h-3 w-3 bg-primary/40 rounded-full animate-pulse delay-300"></div>
+                    <span className="text-sm text-muted-foreground ml-2">Thinking...</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+          
           <div ref={messagesEndRef} className="h-px" />
         </div>
       </div>

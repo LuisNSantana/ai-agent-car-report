@@ -16,6 +16,20 @@ export default defineSchema({
     createdAt: v.number(),
   }).index("by_chat", ["chatId"]),
 
+  tokenUsage: defineTable({
+    userId: v.string(),
+    chatId: v.optional(v.id("chats")),
+    inputTokens: v.number(),
+    outputTokens: v.number(),
+    totalTokens: v.number(),
+    model: v.string(),
+    timestamp: v.number(),
+    date: v.string(), // YYYY-MM-DD format for easy querying by date
+  })
+    .index("by_user", ["userId"])
+    .index("by_user_and_date", ["userId", "date"])
+    .index("by_chat", ["chatId"]),
+
   usersTelegram: defineTable({
     nickname: v.string(), // Nombre del usuario
     chat_id: v.number(), // ID del chat en Telegram

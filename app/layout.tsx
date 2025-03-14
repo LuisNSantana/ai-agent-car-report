@@ -1,8 +1,11 @@
-import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import type { Metadata } from "next";
 import "./globals.css";
 import ConvexClientProvider from "@/components/ConvexClientProvider";
 import { cn } from "@/lib/utils";
+import { ClerkProvider } from "@clerk/nextjs";
+import { NavigationProvider } from "@/lib/context/navigation";
+import { ThemeProvider } from "@/components/ThemeProvider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -15,8 +18,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AI AGENT",
-  description: "AI AGENT",
+  title: "Zynk - Your AI Assistant",
+  description: "Zynk is your AI assistant for research, writing, and more.",
 };
 
 export default function RootLayout({
@@ -25,17 +28,28 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <ConvexClientProvider>
-    <html lang="en" className="dark">
+    <html lang="en" suppressHydrationWarning>
       <body
         className={cn(
           `${geistSans.variable} ${geistMono.variable}`,
           "antialiased min-h-screen bg-background"
         )}
       >
-        {children}
+        <ClerkProvider>
+          <ConvexClientProvider>
+            <ThemeProvider 
+              attribute="class" 
+              defaultTheme="dark" 
+              enableSystem 
+              disableTransitionOnChange
+            >
+              <NavigationProvider>
+                {children}
+              </NavigationProvider>
+            </ThemeProvider>
+          </ConvexClientProvider>
+        </ClerkProvider>
       </body>
     </html>
-    </ConvexClientProvider>
   );
 }
